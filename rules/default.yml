@@ -1,0 +1,74 @@
+# This configuration defines how two URLs are considered equal. There are
+# Tokens, Inquisitors, and Processors. Tokens of a URL are simple strings
+# inherent in the URL itself (the scheme, the port number, the domain, the 
+# path, etc.). Inquisitors are more expensive attributes that require performing 
+# a lookup (a dns record, an HTTP response code, an HTTP location header, etc.).
+# Processors are mutations on Tokens that change their encoding (URL-encode,
+# Base64-encode).
+# For a URL to be determined a duplicate, all declared Tokens, Inquisitors, and Processors
+# must match (i.e., following boolean AND logic).
+
+# Available simple tokens. Consider the example URL:  https://user:pass@host.com:1234/path?param1=xx&param2=yy#ff
+# scheme          mysql
+# username        user
+# password        pass
+# domain          host.com
+# port            1234
+# path            /path
+# queryparams     param1=xx&param2=yy
+# fragment        ff
+
+# Available processors: these tokens alter the input string, and see if the altered string is found elsewhere in the input list.
+# urlencode     (NOT IMPLEMENTED) 
+# base64encode  (NOT IMPLEMENTED) 
+
+# Available inquisitors
+# dnsa          If any A record matches any A record of another input, consider them duplicates
+# dnscname      Compares the CNAME record. Performs DNS queries using OS system libraries.
+# statuscode    Compares the HTTP response status code
+# contentlength Compares the HTTP response body content length (not the value specified by the response header, but the actual calculated length)
+# title         (NOT IMPLEMENTED) Compares the page title from the HTTP body
+# location      (NOT IMPLEMENTED) Compares the HTTP response Location header value
+# wordcount     (NOT IMPLEMENTED) Compares the count of words observed in the HTTP response body
+# linecount     (NOT IMPLEMENTED) Compares the count of lines observed in the HTTP response body
+
+# This file contains one ruleset, which contains the named rule "default", and the named rule "simple". 
+# Every token, inquisitor, and processor for a single rule must match in order for two URLs to be 
+# considered duplicate. This matching logic is performed for each named rule. If a pair of URLs are 
+# determined equivalent based on the named rule "simple", it is removed (even if the URL is not determined 
+# equivalent based on the named rule "default"). Put in other words, if *any* named rule identifies a 
+# pair of URLs as equivalent, then that URL is classified as a duplicate and discarded.
+rules:
+- name: default
+  tokens:
+  - scheme
+  - domain
+  - port
+  - path
+
+- name: simple
+  tokens:
+  - scheme
+  - port
+  - path
+  inquisitors:
+  - dnsa
+
+#- name: example
+#  tokens:
+#  - scheme
+#  - username
+#  - password
+#  - port
+#  - domain
+#  - path
+#  - fragment
+#  - queryparams
+#  processors:
+#  - urlencode: path
+#  - base64encode: queryparams
+#  - base64encode: queryparams
+#  inquisitors:
+#  - dnsa
+#  - dnscname
+#  - statuscode
