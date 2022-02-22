@@ -63,6 +63,14 @@ func (u *URL) equals(u2 *URL, rule *Rule) bool {
 	// Short-circuit test: Compare Values
 	if u.Value == u2.Value {
 		return true
+		fmt.Println("1")
+	}
+
+	// Verify at least one definition of equality exists, else equality is not possible.
+	if (len(rule.Tokens) == 0 &&
+		len(rule.Processors) == 0 &&
+		len(rule.Inquisitors) == 0){
+		return false
 	}
 
 	// Compare Tokens
@@ -138,11 +146,11 @@ func parseURL(input string) *URL {
 }
 
 // Test whether a single URL exists within an array of URLs, as determined by the array of Rules
-func existsWithin(needle *URL, haystack *[]URL, rules *[]Rule) bool {
+func existsWithin(needle *URL, haystack []*URL, rules []*Rule) bool {
 	// Compare given needle to every item in haystack
-	for _, url := range *haystack {
-		for _, rule := range *rules {
-			if needle.equals(&url, &rule) {
+	for _, url := range haystack {
+		for _, rule := range rules {
+			if needle.equals(url, rule) {
 				if verbose {
 					log.Print("[+] Duplicate found!")
 					log.Print("[+]     Omitting:     " + needle.Value)
@@ -160,10 +168,10 @@ func existsWithin(needle *URL, haystack *[]URL, rules *[]Rule) bool {
 var verbose bool
 var insecure bool
 
-func batchQueryIPAddress(urls *[]URL, size int) {
+func batchQueryIPAddress(urls []*URL, size int) {
 	maxBatchSize := size
 	skip := 0
-	numURLs := len(*urls)
+	numURLs := len(urls)
 	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
 
 	for i := 0; i <= numBatches; i++ {
@@ -174,7 +182,7 @@ func batchQueryIPAddress(urls *[]URL, size int) {
 			upperBound = numURLs
 		}
 
-		batchItems := (*urls)[lowerBound:upperBound]
+		batchItems := urls[lowerBound:upperBound]
 		skip += maxBatchSize
 
 		var itemProcessingGroup sync.WaitGroup
@@ -188,16 +196,16 @@ func batchQueryIPAddress(urls *[]URL, size int) {
 				if len(currentURL.IPAddrs) == 0 {
 					currentURL.IPAddrs, _ = net.LookupIP(currentURL.Domain)
 				}
-			}(&batchItems[idx])
+			}(batchItems[idx])
 		}
 		itemProcessingGroup.Wait()
 	}
 }
 
-func batchQueryHTTP(urls *[]URL, size int) {
+func batchQueryHTTP(urls []*URL, size int) {
 	maxBatchSize := size
 	skip := 0
-	numURLs := len(*urls)
+	numURLs := len(urls)
 	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
 
 	// Create HTTP client
@@ -214,7 +222,7 @@ func batchQueryHTTP(urls *[]URL, size int) {
 			upperBound = numURLs
 		}
 
-		batchItems := (*urls)[lowerBound:upperBound]
+		batchItems := urls[lowerBound:upperBound]
 		skip += maxBatchSize
 
 		var itemProcessingGroup sync.WaitGroup
@@ -235,17 +243,17 @@ func batchQueryHTTP(urls *[]URL, size int) {
 						currentURL.ContentLength = resp.ContentLength
 					}
 				}
-			}(&batchItems[idx])
+			}(batchItems[idx])
 		}
 		itemProcessingGroup.Wait()
 	}
 
 }
 
-func batchQueryCNAME(urls *[]URL, size int) {
+func batchQueryCNAME(urls []*URL, size int) {
 	maxBatchSize := size
 	skip := 0
-	numURLs := len(*urls)
+	numURLs := len(urls)
 	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
 
 	for i := 0; i <= numBatches; i++ {
@@ -256,7 +264,7 @@ func batchQueryCNAME(urls *[]URL, size int) {
 			upperBound = numURLs
 		}
 
-		batchItems := (*urls)[lowerBound:upperBound]
+		batchItems := urls[lowerBound:upperBound]
 		skip += maxBatchSize
 
 		var itemProcessingGroup sync.WaitGroup
@@ -270,15 +278,26 @@ func batchQueryCNAME(urls *[]URL, size int) {
 				if currentURL.CName == "" {
 					currentURL.CName, _ = net.LookupCNAME(currentURL.Domain)
 				}
-			}(&batchItems[idx])
+			}(batchItems[idx])
 		}
 		itemProcessingGroup.Wait()
 	}
 }
 
+// Determine whether a user passed a particular command line argument
+func isFlagPassed(name string) bool {
+    found := false
+    flag.Visit(func(f *flag.Flag) {
+        if f.Name == name {
+            found = true
+        }
+    })
+    return found
+}
+
 func main() {
-	rulesFilepath := flag.String("rules", "rules/default.yml", "Filepath for rule configuration")
-	ruleName := flag.String("rule", "*", "The single named rule to use (as defined in the rule configuration file)")
+	rulesFilepath := flag.String("rules", "", "Filepath for rule configuration")
+	//ruleName := flag.String("rule", "*", "The single named rule to use (as defined in the rule configuration file)")
 	numThreads := flag.Int("threads", 30, "Number of threads")
 	flag.BoolVar(&insecure, "insecure", false, "Disable TLS certificate verification")
 	flag.BoolVar(&verbose, "verbose", false, "Increase verbosity in stderr")
@@ -295,35 +314,36 @@ func main() {
 		inputIsStdIn = false
 	}
 	flag.Parse()
-
+	
 	// Set log flags. Available flags: https://pkg.go.dev/log#pkg-constants
 	//log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetFlags(0)
 
-	// Parse configuration into struct
-	rulesFile, err := ioutil.ReadFile(*rulesFilepath)
-	if err != nil {
-		fmt.Println(err)
-	}
 	var cfg Config
-	err = yaml.Unmarshal(rulesFile, &cfg)
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	// Find the configuration rules to use
-	var rules []Rule
-	for _, element := range cfg.Rules {
-		if element.Name == *ruleName {
-			element.Filepath = *rulesFilepath
-			rules = append(rules, *element)
-		} else if *ruleName == "*" {
-			element.Filepath = *rulesFilepath
-			rules = append(rules, *element)
+	// Check if user supplies a rule file, else use default string match
+	if(isFlagPassed("rules")){
+		// Parse configuration into struct
+		rulesFile, err := ioutil.ReadFile(*rulesFilepath)
+		if err != nil {
+			fmt.Println(err)
 		}
-	}
-	if len(rules) == 0 {
-		fmt.Println("Uh oh, looks like the rule \"" + *ruleName + "\" was not found!")
+		
+		err = yaml.Unmarshal(rulesFile, &cfg)
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		// Populate filepath into each rule struct
+		for i := 0; i < len(cfg.Rules); i++ {
+			cfg.Rules[i].Filepath = *rulesFilepath
+		}
+
+	} else {
+		// Set default rule configuration
+		defaultRule := Rule{
+			Name: "simple-string-match",
+		}
+		cfg = Config{Rules: []*Rule{&defaultRule}}
 	}
 
 	// Get the processor type
@@ -331,7 +351,7 @@ func main() {
 	//fmt.Println(val.Type().Field(0).Name)
 
 	// Parse input file (or stdin) into array of URLs
-	var urls []URL
+	var urls []*URL
 	var scanner *bufio.Scanner
 	if(inputIsStdIn){
 		if verbose {
@@ -348,7 +368,7 @@ func main() {
 	}
 	// Note: scanner limits lines to 64kb.
 	for scanner.Scan() {
-		urls = append(urls, *parseURL(scanner.Text()))
+		urls = append(urls, parseURL(scanner.Text()))
 	}
 	if err := scanner.Err(); err != nil {
 		fmt.Println(err)
@@ -361,7 +381,7 @@ func main() {
 	isPopulatedDNSCNAME := false
 	isPopulatedSCCL := false
 
-	for _, rule := range rules {
+	for _, rule := range cfg.Rules {
 		for _, element := range rule.Inquisitors {
 			switch element {
 			case "dnsa":
@@ -369,7 +389,7 @@ func main() {
 					if verbose {
 						log.Print("[+] Performing DNS A-Record queries...")
 					}
-					batchQueryIPAddress(&urls, *numThreads)
+					batchQueryIPAddress(urls, *numThreads)
 					
 				}
 				isPopulatedDNSA = true
@@ -378,7 +398,7 @@ func main() {
 					if verbose {
 						log.Print("[+] Performing DNS CNAME-Record queries...")
 					}
-					batchQueryCNAME(&urls, *numThreads)
+					batchQueryCNAME(urls, *numThreads)
 				}
 				isPopulatedDNSCNAME = true
 			// If there's any of the http-get Inquisitors, populate them all from one query:
@@ -387,7 +407,7 @@ func main() {
 					if verbose {
 						log.Print("[+] Performing HTTP queries...")
 					}
-					batchQueryHTTP(&urls, *numThreads)
+					batchQueryHTTP(urls, *numThreads)
 				}
 				isPopulatedSCCL = true
 			}
@@ -395,9 +415,9 @@ func main() {
 	}
 
 	// Get uniques
-	var urlsUnique []URL
+	var urlsUnique []*URL
 	for _, element := range urls {
-		if !existsWithin(&element, &urlsUnique, &rules) {
+		if !existsWithin(element, urlsUnique, cfg.Rules) {
 			urlsUnique = append(urlsUnique, element)
 		} else {
 			//fmt.Println("Not unique!")
