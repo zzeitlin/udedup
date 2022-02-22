@@ -8,10 +8,12 @@ import (
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 )
 
 // https://zhwt.github.io/yaml-to-go/
@@ -54,7 +56,6 @@ type URL struct {
 
 	// Example tokens: port, path, fragment, queryparams, ...
 	Tokens map[string]string
-	//Inquisitors []string
 }
 
 // Equality between two URLs depends on the Rule struct
@@ -111,6 +112,7 @@ func (u *URL) equals(u2 *URL, rule *Rule) bool {
 	return true
 }
 
+// Convert a URL string into a URL struct.
 func parseURL(input string) *URL {
 	u, err := url.Parse(input)
 	if err != nil {
@@ -135,6 +137,7 @@ func parseURL(input string) *URL {
 	return &ret
 }
 
+// Test whether a single URL exists within an array of URLs, as determined by the array of Rules
 func existsWithin(needle *URL, haystack *[]URL, rules *[]Rule) bool {
 	// Compare given needle to every item in haystack
 	for _, url := range *haystack {
@@ -153,13 +156,96 @@ func existsWithin(needle *URL, haystack *[]URL, rules *[]Rule) bool {
 	return false
 }
 
+// Global flag.
 var verbose bool
+var insecure bool
+
+func batchQueryIPAddress(urls *[]URL, size int) {
+	maxBatchSize := size
+	skip := 0
+	numURLs := len(*urls)
+	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
+
+	for i := 0; i <= numBatches; i++ {
+		lowerBound := skip
+		upperBound := skip + maxBatchSize
+
+		if upperBound > numURLs {
+			upperBound = numURLs
+		}
+
+		batchItems := (*urls)[lowerBound:upperBound]
+		skip += maxBatchSize
+
+		var itemProcessingGroup sync.WaitGroup
+		itemProcessingGroup.Add(len(batchItems))
+
+		for idx := 0; idx < len(batchItems); idx++ {
+			go func(currentURL *URL) {
+				// Mark WaitGroup as done at the end of this function.
+				defer itemProcessingGroup.Done()
+				// Process the URL: perform DNS query.
+				if len(currentURL.IPAddrs) == 0 {
+					currentURL.IPAddrs, _ = net.LookupIP(currentURL.Domain)
+				}
+			}(&batchItems[idx])
+		}
+		itemProcessingGroup.Wait()
+	}
+}
+
+func batchQueryHTTP(urls *[]URL, size int) {
+	maxBatchSize := size
+	skip := 0
+	numURLs := len(*urls)
+	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
+
+	// Create HTTP client
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
+	}
+	httpClient := &http.Client{Transport: tr}
+
+	for i := 0; i <= numBatches; i++ {
+		lowerBound := skip
+		upperBound := skip + maxBatchSize
+
+		if upperBound > numURLs {
+			upperBound = numURLs
+		}
+
+		batchItems := (*urls)[lowerBound:upperBound]
+		skip += maxBatchSize
+
+		var itemProcessingGroup sync.WaitGroup
+		itemProcessingGroup.Add(len(batchItems))
+
+		for idx := 0; idx < len(batchItems); idx++ {
+			go func(currentURL *URL) {
+				// Mark WaitGroup as done at the end of this function.
+				defer itemProcessingGroup.Done()
+				// Process the URL: perform DNS query.
+				if currentURL.StatusCode == 0 {
+					resp, err := httpClient.Get(currentURL.Value)
+					if err != nil {
+						fmt.Println("ERROR: " + err.Error())
+					}
+					if resp != nil {
+						currentURL.StatusCode = resp.StatusCode
+						currentURL.ContentLength = resp.ContentLength
+					}
+				}
+			}(&batchItems[idx])
+		}
+		itemProcessingGroup.Wait()
+	}
+
+}
 
 func main() {
 	rulesFilepath := flag.String("rules", "rules/default.yml", "Filepath for rule configuration")
 	ruleName := flag.String("rule", "*", "The single named rule to use (as defined in the rule configuration file)")
 	inputFilepath := flag.String("input", "input.txt", "Filepath for list of URLs")
-	var insecure bool
 	flag.BoolVar(&insecure, "insecure", false, "Disable TLS certificate verification")
 	flag.BoolVar(&verbose, "verbose", false, "Increase verbosity in stderr")
 	//cTimeout := flag.Int("timeout", 5, "Connection timeout in seconds")
@@ -221,12 +307,6 @@ func main() {
 	isPopulatedDNSCNAME := false
 	isPopulatedSCCL := false
 
-	// Create HTTP client
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
-	}
-	httpClient := &http.Client{Transport: tr}
-
 	for _, rule := range rules {
 		for _, element := range rule.Inquisitors {
 			switch element {
@@ -235,11 +315,8 @@ func main() {
 					if verbose {
 						log.Print("[+] Performing DNS A-Record queries...")
 					}
-					for i := 0; i < len(urls); i++ {
-						if len(urls[i].IPAddrs) == 0 {
-							urls[i].IPAddrs, _ = net.LookupIP(urls[i].Domain)
-						}
-					}
+					batchQueryIPAddress(&urls, 10)
+					
 				}
 				isPopulatedDNSA = true
 			case "dnscname":
@@ -260,18 +337,7 @@ func main() {
 					if verbose {
 						log.Print("[+] Performing HTTP queries...")
 					}
-					for i := 0; i < len(urls); i++ {
-						if urls[i].StatusCode == 0 {
-							resp, err := httpClient.Get(urls[i].Value)
-							if err != nil {
-								fmt.Println("ERROR: " + err.Error())
-							}
-							if resp != nil {
-								urls[i].StatusCode = resp.StatusCode
-								urls[i].ContentLength = resp.ContentLength
-							}
-						}
-					}
+					batchQueryHTTP(&urls, 10)
 				}
 				isPopulatedSCCL = true
 			}
