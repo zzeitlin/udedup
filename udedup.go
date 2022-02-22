@@ -242,10 +242,45 @@ func batchQueryHTTP(urls *[]URL, size int) {
 
 }
 
+func batchQueryCNAME(urls *[]URL, size int) {
+	maxBatchSize := size
+	skip := 0
+	numURLs := len(*urls)
+	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
+
+	for i := 0; i <= numBatches; i++ {
+		lowerBound := skip
+		upperBound := skip + maxBatchSize
+
+		if upperBound > numURLs {
+			upperBound = numURLs
+		}
+
+		batchItems := (*urls)[lowerBound:upperBound]
+		skip += maxBatchSize
+
+		var itemProcessingGroup sync.WaitGroup
+		itemProcessingGroup.Add(len(batchItems))
+
+		for idx := 0; idx < len(batchItems); idx++ {
+			go func(currentURL *URL) {
+				// Mark WaitGroup as done at the end of this function.
+				defer itemProcessingGroup.Done()
+				// Process the URL: perform DNS query.
+				if currentURL.CName == "" {
+					currentURL.CName, _ = net.LookupCNAME(currentURL.Domain)
+				}
+			}(&batchItems[idx])
+		}
+		itemProcessingGroup.Wait()
+	}
+}
+
 func main() {
 	rulesFilepath := flag.String("rules", "rules/default.yml", "Filepath for rule configuration")
 	ruleName := flag.String("rule", "*", "The single named rule to use (as defined in the rule configuration file)")
 	inputFilepath := flag.String("input", "input.txt", "Filepath for list of URLs")
+	numThreads := flag.Int("threads", 30, "Number of threads")
 	flag.BoolVar(&insecure, "insecure", false, "Disable TLS certificate verification")
 	flag.BoolVar(&verbose, "verbose", false, "Increase verbosity in stderr")
 	//cTimeout := flag.Int("timeout", 5, "Connection timeout in seconds")
@@ -315,7 +350,7 @@ func main() {
 					if verbose {
 						log.Print("[+] Performing DNS A-Record queries...")
 					}
-					batchQueryIPAddress(&urls, 10)
+					batchQueryIPAddress(&urls, *numThreads)
 					
 				}
 				isPopulatedDNSA = true
@@ -324,11 +359,7 @@ func main() {
 					if verbose {
 						log.Print("[+] Performing DNS CNAME-Record queries...")
 					}
-					for i := 0; i < len(urls); i++ {
-						if urls[i].CName == "" {
-							urls[i].CName, _ = net.LookupCNAME(urls[i].Domain)
-						}
-					}
+					batchQueryCNAME(&urls, *numThreads)
 				}
 				isPopulatedDNSCNAME = true
 			// If there's any of the http-get Inquisitors, populate them all from one query:
@@ -337,7 +368,7 @@ func main() {
 					if verbose {
 						log.Print("[+] Performing HTTP queries...")
 					}
-					batchQueryHTTP(&urls, 10)
+					batchQueryHTTP(&urls, *numThreads)
 				}
 				isPopulatedSCCL = true
 			}
