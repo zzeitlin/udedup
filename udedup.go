@@ -279,11 +279,21 @@ func batchQueryCNAME(urls *[]URL, size int) {
 func main() {
 	rulesFilepath := flag.String("rules", "rules/default.yml", "Filepath for rule configuration")
 	ruleName := flag.String("rule", "*", "The single named rule to use (as defined in the rule configuration file)")
-	inputFilepath := flag.String("input", "input.txt", "Filepath for list of URLs")
 	numThreads := flag.Int("threads", 30, "Number of threads")
 	flag.BoolVar(&insecure, "insecure", false, "Disable TLS certificate verification")
 	flag.BoolVar(&verbose, "verbose", false, "Increase verbosity in stderr")
 	//cTimeout := flag.Int("timeout", 5, "Connection timeout in seconds")
+
+	// Check for stdin data:
+	stat, _ := os.Stdin.Stat()
+	var inputIsStdIn bool
+	var inputFilepath *string
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		inputIsStdIn = true
+	} else {
+		inputFilepath = flag.String("input", "input.txt", "Filepath for URL list. Overwritten by stdin.")
+		inputIsStdIn = false
+	}
 	flag.Parse()
 
 	// Set log flags. Available flags: https://pkg.go.dev/log#pkg-constants
@@ -320,14 +330,22 @@ func main() {
 	//val := reflect.Indirect(reflect.ValueOf(rule.Processors[0]))
 	//fmt.Println(val.Type().Field(0).Name)
 
-	// Parse input file into array of URLs
+	// Parse input file (or stdin) into array of URLs
 	var urls []URL
-	f, err := os.Open(*inputFilepath)
-	if err != nil {
-		fmt.Println(err)
+	var scanner *bufio.Scanner
+	if(inputIsStdIn){
+		if verbose {
+			log.Print("[+] Reading input from standard input...")
+		}
+		scanner = bufio.NewScanner(os.Stdin)
+	} else {
+		f, err := os.Open(*inputFilepath)
+		if err != nil {
+			fmt.Println(err)
+		}
+		defer f.Close()
+		scanner = bufio.NewScanner(f)
 	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
 	// Note: scanner limits lines to 64kb.
 	for scanner.Scan() {
 		urls = append(urls, *parseURL(scanner.Text()))
@@ -335,6 +353,7 @@ func main() {
 	if err := scanner.Err(); err != nil {
 		fmt.Println(err)
 	}
+
 
 	// Prepopulate Inquisitor-based URL attributes (fetch data only if the config rules need it)
 	// Booleans used to save whether URL struct has populated the data (to prevent multiple fetches)
@@ -395,3 +414,6 @@ func main() {
 		fmt.Println(element.Value)
 	}
 }
+
+
+
