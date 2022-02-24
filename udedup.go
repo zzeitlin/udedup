@@ -272,7 +272,6 @@ func batchQueryHTTP(urls []*URL, size int) {
 					}
 				}
 			}(batchItems[idx])
-			time.Sleep(100 * time.Millisecond)
 		}
 		itemProcessingGroup.Wait()
 	}
