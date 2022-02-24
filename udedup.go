@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"github.com/schollz/progressbar/v3"
+	"time"
 )
 
 // https://zhwt.github.io/yaml-to-go/
@@ -63,7 +65,6 @@ func (u *URL) equals(u2 *URL, rule *Rule) bool {
 	// Short-circuit test: Compare Values
 	if u.Value == u2.Value {
 		return true
-		fmt.Println("1")
 	}
 
 	// Verify at least one definition of equality exists, else equality is not possible.
@@ -164,15 +165,17 @@ func existsWithin(needle *URL, haystack []*URL, rules []*Rule) bool {
 	return false
 }
 
-// Global flag.
+// Global flags.
 var verbose bool
 var insecure bool
+var httpTimeout int
 
 func batchQueryIPAddress(urls []*URL, size int) {
 	maxBatchSize := size
 	skip := 0
 	numURLs := len(urls)
 	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
+	bar := progressbar.Default(int64(numURLs))
 
 	for i := 0; i <= numBatches; i++ {
 		lowerBound := skip
@@ -189,6 +192,7 @@ func batchQueryIPAddress(urls []*URL, size int) {
 		itemProcessingGroup.Add(len(batchItems))
 
 		for idx := 0; idx < len(batchItems); idx++ {
+			bar.Add(1)
 			go func(currentURL *URL) {
 				// Mark WaitGroup as done at the end of this function.
 				defer itemProcessingGroup.Done()
@@ -199,6 +203,7 @@ func batchQueryIPAddress(urls []*URL, size int) {
 			}(batchItems[idx])
 		}
 		itemProcessingGroup.Wait()
+		
 	}
 }
 
@@ -207,12 +212,16 @@ func batchQueryHTTP(urls []*URL, size int) {
 	skip := 0
 	numURLs := len(urls)
 	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
+	bar := progressbar.Default(int64(numURLs))
 
 	// Create HTTP client
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
 	}
-	httpClient := &http.Client{Transport: tr}
+	httpClient := &http.Client{
+		Transport: tr,
+		Timeout: time.Duration(httpTimeout) * time.Second,
+	}
 
 	for i := 0; i <= numBatches; i++ {
 		lowerBound := skip
@@ -229,6 +238,7 @@ func batchQueryHTTP(urls []*URL, size int) {
 		itemProcessingGroup.Add(len(batchItems))
 
 		for idx := 0; idx < len(batchItems); idx++ {
+			bar.Add(1)
 			go func(currentURL *URL) {
 				// Mark WaitGroup as done at the end of this function.
 				defer itemProcessingGroup.Done()
@@ -236,7 +246,9 @@ func batchQueryHTTP(urls []*URL, size int) {
 				if currentURL.StatusCode == 0 {
 					resp, err := httpClient.Get(currentURL.Value)
 					if err != nil {
-						fmt.Println("ERROR: " + err.Error())
+						if verbose {
+							log.Print("[+] HTTP Error: " + err.Error())
+						}
 					}
 					if resp != nil {
 						currentURL.StatusCode = resp.StatusCode
@@ -255,6 +267,7 @@ func batchQueryCNAME(urls []*URL, size int) {
 	skip := 0
 	numURLs := len(urls)
 	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
+	bar := progressbar.Default(int64(numURLs))
 
 	for i := 0; i <= numBatches; i++ {
 		lowerBound := skip
@@ -271,6 +284,7 @@ func batchQueryCNAME(urls []*URL, size int) {
 		itemProcessingGroup.Add(len(batchItems))
 
 		for idx := 0; idx < len(batchItems); idx++ {
+			bar.Add(1)
 			go func(currentURL *URL) {
 				// Mark WaitGroup as done at the end of this function.
 				defer itemProcessingGroup.Done()
@@ -296,9 +310,11 @@ func isFlagPassed(name string) bool {
 }
 
 func main() {
+
 	rulesFilepath := flag.String("rules", "", "Filepath for rule configuration")
 	//ruleName := flag.String("rule", "*", "The single named rule to use (as defined in the rule configuration file)")
 	numThreads := flag.Int("threads", 30, "Number of threads")
+	flag.IntVar(&httpTimeout, "timeout", 3, "Timeout of HTTP requests")
 	flag.BoolVar(&insecure, "insecure", false, "Disable TLS certificate verification")
 	flag.BoolVar(&verbose, "verbose", false, "Increase verbosity in stderr")
 	//cTimeout := flag.Int("timeout", 5, "Connection timeout in seconds")
@@ -380,6 +396,7 @@ func main() {
 	isPopulatedDNSA := false
 	isPopulatedDNSCNAME := false
 	isPopulatedSCCL := false
+
 
 	for _, rule := range cfg.Rules {
 		for _, element := range rule.Inquisitors {
