@@ -175,7 +175,15 @@ func batchQueryIPAddress(urls []*URL, size int) {
 	skip := 0
 	numURLs := len(urls)
 	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
-	bar := progressbar.Default(int64(numURLs))
+	bar := progressbar.NewOptions(numURLs,
+		progressbar.OptionSetDescription("Querying DNS A-Records..."),
+		progressbar.OptionShowCount(),
+		progressbar.OptionSetWriter(os.Stderr),
+		// Need to print an extra newline to prevent clobbering the next line of output
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+	)
 
 	for i := 0; i <= numBatches; i++ {
 		lowerBound := skip
@@ -212,7 +220,15 @@ func batchQueryHTTP(urls []*URL, size int) {
 	skip := 0
 	numURLs := len(urls)
 	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
-	bar := progressbar.Default(int64(numURLs))
+	bar := progressbar.NewOptions(numURLs,
+		progressbar.OptionSetDescription("Querying HTTP..."),
+		progressbar.OptionShowCount(),
+		progressbar.OptionSetWriter(os.Stderr),
+		// Need to print an extra newline to prevent clobbering the next line of output
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+	)
 
 	// Create HTTP client
 	tr := &http.Transport{
@@ -256,6 +272,7 @@ func batchQueryHTTP(urls []*URL, size int) {
 					}
 				}
 			}(batchItems[idx])
+			time.Sleep(100 * time.Millisecond)
 		}
 		itemProcessingGroup.Wait()
 	}
@@ -267,7 +284,15 @@ func batchQueryCNAME(urls []*URL, size int) {
 	skip := 0
 	numURLs := len(urls)
 	numBatches := int(math.Ceil(float64(numURLs / maxBatchSize)))
-	bar := progressbar.Default(int64(numURLs))
+	bar := progressbar.NewOptions(numURLs,
+		progressbar.OptionSetDescription("Querying DNS CNAME-Records..."),
+		progressbar.OptionShowCount(),
+		progressbar.OptionSetWriter(os.Stderr),
+		// Need to print an extra newline to prevent clobbering the next line of output
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+	)
 
 	for i := 0; i <= numBatches; i++ {
 		lowerBound := skip
@@ -403,27 +428,18 @@ func main() {
 			switch element {
 			case "dnsa":
 				if !isPopulatedDNSA {
-					if verbose {
-						log.Print("[+] Performing DNS A-Record queries...")
-					}
 					batchQueryIPAddress(urls, *numThreads)
 					
 				}
 				isPopulatedDNSA = true
 			case "dnscname":
 				if !isPopulatedDNSCNAME {
-					if verbose {
-						log.Print("[+] Performing DNS CNAME-Record queries...")
-					}
 					batchQueryCNAME(urls, *numThreads)
 				}
 				isPopulatedDNSCNAME = true
 			// If there's any of the http-get Inquisitors, populate them all from one query:
 			case "statuscode", "contentlength":
 				if !isPopulatedSCCL {
-					if verbose {
-						log.Print("[+] Performing HTTP queries...")
-					}
 					batchQueryHTTP(urls, *numThreads)
 				}
 				isPopulatedSCCL = true
