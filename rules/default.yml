@@ -9,7 +9,7 @@
 # must match (i.e., following boolean AND logic).
 
 # Available simple tokens. Consider the example URL:  https://user:pass@host.com:1234/path?param1=xx&param2=yy#ff
-# scheme          mysql
+# scheme          https
 # username        user
 # password        pass
 # domain          host.com
