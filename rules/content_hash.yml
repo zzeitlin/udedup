@@ -1,0 +1,9 @@
+rules:
+  - name: default
+    tokens:
+      - path
+    inquisitors:
+      - dnsa
+      - statuscode
+      - contentlength
+      - contenthash
