@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"crypto/md5"
 	"crypto/tls"
+	"encoding/hex"
 	"flag"
 	"fmt"
-	"gopkg.in/yaml.v2"
+	"io"
 	"io/ioutil"
 	"log"
 	"math"
@@ -14,8 +16,10 @@ import (
 	"net/url"
 	"os"
 	"sync"
-	"github.com/schollz/progressbar/v3"
 	"time"
+
+	"github.com/schollz/progressbar/v3"
+	"gopkg.in/yaml.v2"
 )
 
 // https://zhwt.github.io/yaml-to-go/
@@ -55,6 +59,7 @@ type URL struct {
 	StatusCode    int
 	ContentLength int64
 	Protocol      string // "HTTP/1.0"
+	ContentHash   string // hashed value of the content
 
 	// Example tokens: port, path, fragment, queryparams, ...
 	Tokens map[string]string
@@ -68,9 +73,9 @@ func (u *URL) equals(u2 *URL, rule *Rule) bool {
 	}
 
 	// Verify at least one definition of equality exists, else equality is not possible.
-	if (len(rule.Tokens) == 0 &&
+	if len(rule.Tokens) == 0 &&
 		len(rule.Processors) == 0 &&
-		len(rule.Inquisitors) == 0){
+		len(rule.Inquisitors) == 0 {
 		return false
 	}
 
@@ -110,6 +115,10 @@ func (u *URL) equals(u2 *URL, rule *Rule) bool {
 			}
 		case "contentlength":
 			if u.ContentLength != u2.ContentLength {
+				return false
+			}
+		case "contenthash":
+			if u.ContentHash != u2.ContentHash {
 				return false
 			}
 		default:
@@ -211,7 +220,7 @@ func batchQueryIPAddress(urls []*URL, size int) {
 			}(batchItems[idx])
 		}
 		itemProcessingGroup.Wait()
-		
+
 	}
 }
 
@@ -236,7 +245,7 @@ func batchQueryHTTP(urls []*URL, size int) {
 	}
 	httpClient := &http.Client{
 		Transport: tr,
-		Timeout: time.Duration(httpTimeout) * time.Second,
+		Timeout:   time.Duration(httpTimeout) * time.Second,
 	}
 
 	for i := 0; i <= numBatches; i++ {
@@ -258,7 +267,7 @@ func batchQueryHTTP(urls []*URL, size int) {
 			go func(currentURL *URL) {
 				// Mark WaitGroup as done at the end of this function.
 				defer itemProcessingGroup.Done()
-				// Process the URL: perform DNS query.
+				// Process the URL: perform HTTP query.
 				if currentURL.StatusCode == 0 {
 					resp, err := httpClient.Get(currentURL.Value)
 					if err != nil {
@@ -269,6 +278,8 @@ func batchQueryHTTP(urls []*URL, size int) {
 					if resp != nil {
 						currentURL.StatusCode = resp.StatusCode
 						currentURL.ContentLength = resp.ContentLength
+						responseBody := StringifyResponseBody(resp)          // get the body as a string
+						currentURL.ContentHash = CreateMD5Hash(responseBody) // lets hash this thing
 					}
 				}
 			}(batchItems[idx])
@@ -276,6 +287,29 @@ func batchQueryHTTP(urls []*URL, size int) {
 		itemProcessingGroup.Wait()
 	}
 
+}
+
+func StringifyResponseBody(response *http.Response) string {
+	var responseBody string
+	bodyBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		if verbose {
+			log.Print("[+] Response Read Error: " + err.Error())
+		}
+		return ""
+	}
+	responseBody = string(bodyBytes)
+	return responseBody
+}
+
+func CreateMD5Hash(text string) string {
+	var hashed_value string
+	if len(text) > 0 {
+		hasher := md5.New()
+		hasher.Write([]byte(text))
+		hashed_value = hex.EncodeToString(hasher.Sum(nil))
+	}
+	return hashed_value
 }
 
 func batchQueryCNAME(urls []*URL, size int) {
@@ -324,13 +358,13 @@ func batchQueryCNAME(urls []*URL, size int) {
 
 // Determine whether a user passed a particular command line argument
 func isFlagPassed(name string) bool {
-    found := false
-    flag.Visit(func(f *flag.Flag) {
-        if f.Name == name {
-            found = true
-        }
-    })
-    return found
+	found := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
 
 func main() {
@@ -354,20 +388,20 @@ func main() {
 		inputIsStdIn = false
 	}
 	flag.Parse()
-	
+
 	// Set log flags. Available flags: https://pkg.go.dev/log#pkg-constants
 	//log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetFlags(0)
 
 	var cfg Config
 	// Check if user supplies a rule file, else use default string match
-	if(isFlagPassed("rules")){
+	if isFlagPassed("rules") {
 		// Parse configuration into struct
 		rulesFile, err := ioutil.ReadFile(*rulesFilepath)
 		if err != nil {
 			fmt.Println(err)
 		}
-		
+
 		err = yaml.Unmarshal(rulesFile, &cfg)
 		if err != nil {
 			fmt.Println(err)
@@ -393,7 +427,7 @@ func main() {
 	// Parse input file (or stdin) into array of URLs
 	var urls []*URL
 	var scanner *bufio.Scanner
-	if(inputIsStdIn){
+	if inputIsStdIn {
 		if verbose {
 			log.Print("[+] Reading input from standard input...")
 		}
@@ -414,13 +448,11 @@ func main() {
 		fmt.Println(err)
 	}
 
-
 	// Prepopulate Inquisitor-based URL attributes (fetch data only if the config rules need it)
 	// Booleans used to save whether URL struct has populated the data (to prevent multiple fetches)
 	isPopulatedDNSA := false
 	isPopulatedDNSCNAME := false
 	isPopulatedSCCL := false
-
 
 	for _, rule := range cfg.Rules {
 		for _, element := range rule.Inquisitors {
@@ -428,7 +460,7 @@ func main() {
 			case "dnsa":
 				if !isPopulatedDNSA {
 					batchQueryIPAddress(urls, *numThreads)
-					
+
 				}
 				isPopulatedDNSA = true
 			case "dnscname":
@@ -437,7 +469,7 @@ func main() {
 				}
 				isPopulatedDNSCNAME = true
 			// If there's any of the http-get Inquisitors, populate them all from one query:
-			case "statuscode", "contentlength":
+			case "statuscode", "contentlength", "contenthash":
 				if !isPopulatedSCCL {
 					batchQueryHTTP(urls, *numThreads)
 				}
@@ -466,6 +498,3 @@ func main() {
 		fmt.Println(element.Value)
 	}
 }
-
-
-
