@@ -267,7 +267,7 @@ func batchQueryHTTP(urls []*URL, size int) {
 			go func(currentURL *URL) {
 				// Mark WaitGroup as done at the end of this function.
 				defer itemProcessingGroup.Done()
-				// Process the URL: perform DNS query.
+				// Process the URL: perform HTTP query.
 				if currentURL.StatusCode == 0 {
 					resp, err := httpClient.Get(currentURL.Value)
 					if err != nil {
@@ -469,7 +469,7 @@ func main() {
 				}
 				isPopulatedDNSCNAME = true
 			// If there's any of the http-get Inquisitors, populate them all from one query:
-			case "statuscode", "contentlength":
+			case "statuscode", "contentlength", "contenthash":
 				if !isPopulatedSCCL {
 					batchQueryHTTP(urls, *numThreads)
 				}
