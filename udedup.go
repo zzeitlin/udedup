@@ -372,7 +372,7 @@ func main() {
 	rulesFilepath := flag.String("rules", "", "Filepath for rule configuration")
 	//ruleName := flag.String("rule", "*", "The single named rule to use (as defined in the rule configuration file)")
 	numThreads := flag.Int("threads", 30, "Number of threads")
-	flag.IntVar(&httpTimeout, "timeout", 3, "Timeout of HTTP requests")
+	flag.IntVar(&httpTimeout, "timeout", 3, "Timeout in seconds for HTTP requests")
 	flag.BoolVar(&insecure, "insecure", false, "Disable TLS certificate verification")
 	flag.BoolVar(&verbose, "verbose", false, "Increase verbosity in stderr")
 	//cTimeout := flag.Int("timeout", 5, "Connection timeout in seconds")
