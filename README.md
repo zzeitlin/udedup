@@ -61,4 +61,4 @@ http://example.com
 ```
 
 ### Rule Definiton
-See [rules/default.yml](rules/default.yml) for comments on the structure of defining equality.
+See [rules/example.yml](rules/example.yml) for comments on the structure of defining equality.
