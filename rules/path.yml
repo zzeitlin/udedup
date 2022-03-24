@@ -1,0 +1,4 @@
+rules:
+  - name: default
+    tokens:
+      - path

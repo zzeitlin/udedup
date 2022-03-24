@@ -78,3 +78,5 @@ rules:
 #  - dnsa
 #  - dnscname
 #  - statuscode
+#  - contenthash
+#  - contentlength
