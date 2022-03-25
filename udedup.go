@@ -17,6 +17,8 @@ import (
 	"os"
 	"sync"
 	"time"
+	"strconv"
+	"strings"
 
 	"github.com/schollz/progressbar/v3"
 	"gopkg.in/yaml.v2"
@@ -45,6 +47,12 @@ type Rule struct {
 	Processors  []*Processor `yaml:"processors"`
 	Inquisitors []string     `yaml:"inquisitors"`
 }
+// A Match is used to record the actual values obtained that lead to two URLs being declared duplicate.
+type Match struct{
+	isEquivalentURL bool
+	Tokens map[string]string
+	Inquisitors map[string]string
+}
 type Processor struct {
 	Urlencode    string `yaml:"urlencode,omitempty"`
 	Base64Encode string `yaml:"base64encode,omitempty"`
@@ -66,17 +74,23 @@ type URL struct {
 }
 
 // Equality between two URLs depends on the Rule struct
-func (u *URL) equals(u2 *URL, rule *Rule) bool {
+func (u *URL) equals(u2 *URL, rule *Rule) (bool, Match) {
+	// Initialize empty return match
+	match := Match{}
+	match.Tokens = make(map[string]string)
+	match.Inquisitors = make(map[string]string)
+
 	// Short-circuit test: Compare Values
 	if u.Value == u2.Value {
-		return true
+		match.isEquivalentURL = true
+		return true, match
 	}
 
 	// Verify at least one definition of equality exists, else equality is not possible.
 	if len(rule.Tokens) == 0 &&
 		len(rule.Processors) == 0 &&
 		len(rule.Inquisitors) == 0 {
-		return false
+		return false, match
 	}
 
 	// Compare Tokens
@@ -84,8 +98,10 @@ func (u *URL) equals(u2 *URL, rule *Rule) bool {
 		needleToken, _ := u.Tokens[element]
 		haystackToken, _ := u2.Tokens[element]
 		if needleToken != haystackToken {
-			return false
+			return false, match
 		}
+		// Record the equal token in the match struct:
+		match.Tokens[element] = needleToken
 	}
 
 	// Compare Processors
@@ -98,28 +114,38 @@ func (u *URL) equals(u2 *URL, rule *Rule) bool {
 			for _, uIP := range u.IPAddrs {
 				for _, u2IP := range u2.IPAddrs {
 					if uIP.Equal(u2IP) {
+						match.Inquisitors[element] = uIP.String()
 						matchExists = true
 					}
 				}
 			}
 			if !matchExists {
-				return false
+				return false, match
 			}
 		case "dnscname":
 			if u.CName != u2.CName {
-				return false
+				return false, match
+			} else {
+				match.Inquisitors[element] = u.CName
 			}
 		case "statuscode":
 			if u.StatusCode != u2.StatusCode {
-				return false
+				return false, match
+			} else {
+				match.Inquisitors[element] = strconv.Itoa(u.StatusCode)
 			}
+
 		case "contentlength":
 			if u.ContentLength != u2.ContentLength {
-				return false
+				return false, match
+			} else {
+				match.Inquisitors[element] = strconv.FormatInt(u.ContentLength, 10)
 			}
 		case "contenthash":
 			if u.ContentHash != u2.ContentHash {
-				return false
+				return false, match
+			} else {
+				match.Inquisitors[element] = u.ContentHash
 			}
 		default:
 			fmt.Println("Unknown Inquisitor: " + element)
@@ -127,7 +153,7 @@ func (u *URL) equals(u2 *URL, rule *Rule) bool {
 	}
 
 	// By this point, all definitions of equality have passed
-	return true
+	return true, match
 }
 
 // Convert a URL string into a URL struct.
@@ -148,6 +174,18 @@ func parseURL(input string) *URL {
 	tokens["fragment"] = u.Fragment
 	tokens["queryparams"] = u.RawQuery
 
+	// If scheme is http and port is not specified, assume 80
+	if(strings.ToLower(tokens["scheme"]) == "http" && tokens["port"] == "") {
+		tokens["port"] = "80"
+	}
+	// If scheme is https and port is not specified, assume 443
+	if(strings.ToLower(tokens["scheme"]) == "https" && tokens["port"] == "") {
+		tokens["port"] = "443"
+	}
+	// If path is not specified, assume root "/"
+	if(tokens["path"] == ""){
+		tokens["path"] = "/"
+	}
 	ret := URL{
 		Tokens: tokens,
 		Domain: domain,
@@ -160,12 +198,22 @@ func existsWithin(needle *URL, haystack []*URL, rules []*Rule) bool {
 	// Compare given needle to every item in haystack
 	for _, url := range haystack {
 		for _, rule := range rules {
-			if needle.equals(url, rule) {
+			isEqual, match := needle.equals(url, rule)
+			if (isEqual) {
 				if verbose {
 					log.Print("[+] Duplicate found!")
 					log.Print("[+]     Omitting:     " + needle.Value)
 					log.Print("[+]     Duplicate of: " + url.Value)
 					log.Print("[+]     Per rule:     " + rule.Name + " (" + rule.Filepath + ")")
+					if(match.isEquivalentURL) {
+						log.Print("[+]     Strings are equivalent")
+					}
+					for key, element := range match.Tokens {
+						log.Print("[+]          " + key + ": " + element)
+					}
+					for key, element := range match.Inquisitors {
+						log.Print("[+]          " + key + ": " + element)
+					}
 				}
 				return true
 			}
