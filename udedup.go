@@ -209,10 +209,10 @@ func existsWithin(needle *URL, haystack []*URL, rules []*Rule) bool {
 						log.Print("[+]     Strings are equivalent")
 					}
 					for key, element := range match.Tokens {
-						log.Print("[+]          " + key + ": " + element)
+						log.Print("[+]          Matching " + key + ": " + element)
 					}
 					for key, element := range match.Inquisitors {
-						log.Print("[+]          " + key + ": " + element)
+						log.Print("[+]          Matching " + key + ": " + element)
 					}
 				}
 				return true
