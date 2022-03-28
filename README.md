@@ -30,31 +30,40 @@ Usage of udedup:
   -verbose
     	Increase verbosity in stderr
 
-# Basic example using an input file:
+# Basic example using standard input in a pipeline:
+$ cat input.txt | go run udedup.go -rules rules/example.yml -insecure
+Querying DNS A-Records... 100% |████████████████████████████████████████| (6/6)
+https://www.google.com
+http://google.com
+http://example.com
+
+# Basic verbose example using an input file:
 $ udedup -input input.txt -rules rules/example.yml -insecure -verbose
 Querying DNS A-Records... 100% |████████████████████████████████████████| (6/6)
 [+] Duplicate found!
 [+]     Omitting:     https://google.com
 [+]     Duplicate of: https://www.google.com
 [+]     Per rule:     simple (rules/example.yml)
+[+]          Matching scheme: https
+[+]          Matching port: 443
+[+]          Matching path: /
+[+]          Matching dnsa: 216.239.38.120
 [+] Duplicate found!
 [+]     Omitting:     http://93.184.216.34
 [+]     Duplicate of: http://example.com
 [+]     Per rule:     simple (rules/example.yml)
+[+]          Matching scheme: http
+[+]          Matching port: 80
+[+]          Matching path: /
+[+]          Matching dnsa: 93.184.216.34
 [+] Duplicate found!
 [+]     Omitting:     http://example.com
 [+]     Duplicate of: http://example.com
 [+]     Per rule:     default (rules/example.yml)
+[+]     Strings are equivalent
 [+] Input list length:  6
 [+] Output list length: 3
 [+] Printing list of unique URLs...
-https://www.google.com
-http://google.com
-http://example.com
-
-# Basic example using standard input in a pipeline:
-$ cat input.txt | go run udedup.go -rules rules/example.yml -insecure
-Querying DNS A-Records... 100% |████████████████████████████████████████| (6/6)
 https://www.google.com
 http://google.com
 http://example.com
