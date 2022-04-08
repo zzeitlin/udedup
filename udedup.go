@@ -25,19 +25,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// https://zhwt.github.io/yaml-to-go/
-//type Config struct {
-//	Rules []struct {
-//		Name			 string	 `yaml:"name"`
-//		Tokens		 []string `yaml:"tokens"`
-//		Processors []struct {
-//			Urlencode		string `yaml:"urlencode,omitempty"`
-//			Base64Encode string `yaml:"base64encode,omitempty"`
-//		} `yaml:"processors"`
-//		Inquisitors []string `yaml:"inquisitors"`
-//	} `yaml:"rules"`
-//}
-
 type Config struct {
 	Rules []*Rule `yaml:"rules"`
 }

@@ -26,6 +26,8 @@
 #   statuscode    Compares the HTTP response status code
 #   contentlength Compares the HTTP response body content length (not the response header value, but the actual calculated length)
 #   contenthash   Compares the MD5 checksum of the response body.
+#   contentregex  Compares whether a provided regular expression is matched in the response body.
+#   headerregex   (NOT IMPLEMENTED) Compares whether a provided regular expression is matched in the response header.
 #   title         (NOT IMPLEMENTED) Compares the page title from the HTTP body
 #   location      (NOT IMPLEMENTED) Compares the HTTP response Location header value
 #   wordcount     (NOT IMPLEMENTED) Compares the count of words observed in the HTTP response body
@@ -77,6 +79,7 @@ rules:
 #  inquisitors:
 #  - dnsa
 #  - dnscname
+#  - contentregex: example.*regex
 #  - statuscode
 #  - contenthash
 #  - contentlength
