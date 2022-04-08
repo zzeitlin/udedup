@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 	"strconv"
@@ -44,18 +45,28 @@ type Rule struct {
 	Name        string `yaml:"name"`
 	Filepath    string
 	Tokens      []string     `yaml:"tokens"`
+	Inquisitors []*Inquisitor     `yaml:"inquisitors"`
 	Processors  []*Processor `yaml:"processors"`
-	Inquisitors []string     `yaml:"inquisitors"`
+}
+type Inquisitor struct {
+  // A simple key-only inquisitor (e.g., "dnsa", "contenthash")
+  KeyInquisitor string
+  // A key-value inquisitor, where a value is specified (e.g., "contentregex: \<img\>")
+  KeyValueInquisitor map[string]string
+}
+type Processor struct {
+	Urlencode    string `yaml:"urlencode,omitempty"`
+	Base64Encode string `yaml:"base64encode,omitempty"`
 }
 // A Match is used to record the actual values obtained that lead to two URLs being declared duplicate.
 type Match struct{
 	isEquivalentURL bool
 	Tokens map[string]string
-	Inquisitors map[string]string
+	Inquisitors []MatchedInquisitor
 }
-type Processor struct {
-	Urlencode    string `yaml:"urlencode,omitempty"`
-	Base64Encode string `yaml:"base64encode,omitempty"`
+type MatchedInquisitor struct{
+  KeyInquisitor map[string]string
+  KeyValueInquisitor map[string]bool
 }
 type URL struct {
 	Value   string
@@ -68,9 +79,19 @@ type URL struct {
 	ContentLength int64
 	Protocol      string // "HTTP/1.0"
 	ContentHash   string // hashed value of the content
+	ContentRegex  map[string]bool // whether a given regex is found in the content
 
 	// Example tokens: port, path, fragment, queryparams, ...
 	Tokens map[string]string
+}
+
+// Create a custom YAML parser for Inquisitor as they contain Strings and Maps.
+func (s *Inquisitor) UnmarshalYAML(unmarshal func(interface{}) error) error {
+    if err := unmarshal(&(s.KeyInquisitor)); err != nil {
+    }
+    if err := unmarshal(&(s.KeyValueInquisitor)); err != nil {
+    }
+    return nil
 }
 
 // Equality between two URLs depends on the Rule struct
@@ -78,7 +99,7 @@ func (u *URL) equals(u2 *URL, rule *Rule) (bool, Match) {
 	// Initialize empty return match
 	match := Match{}
 	match.Tokens = make(map[string]string)
-	match.Inquisitors = make(map[string]string)
+	match.Inquisitors = make([]MatchedInquisitor, 0)
 
 	// Short-circuit test: Compare Values
 	if u.Value == u2.Value {
@@ -108,49 +129,89 @@ func (u *URL) equals(u2 *URL, rule *Rule) (bool, Match) {
 
 	// Compare Inquisitors
 	for _, element := range rule.Inquisitors {
-		switch element {
-		case "dnsa":
-			matchExists := false
-			for _, uIP := range u.IPAddrs {
-				for _, u2IP := range u2.IPAddrs {
-					if uIP.Equal(u2IP) {
-						match.Inquisitors[element] = uIP.String()
-						matchExists = true
+		// Check KeyInquisitors (a simple string)
+		switch element.KeyInquisitor {
+			case "dnsa":
+				matchExists := false
+				for _, uIP := range u.IPAddrs {
+					for _, u2IP := range u2.IPAddrs {
+						if uIP.Equal(u2IP) {
+							matchExists = true
+							// Record the match
+							matchedInquisitor := MatchedInquisitor{}
+							matchedInquisitor.KeyInquisitor = make(map[string]string)
+							matchedInquisitor.KeyInquisitor[element.KeyInquisitor] = uIP.String()
+							match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
+						}
 					}
 				}
-			}
-			if !matchExists {
-				return false, match
-			}
-		case "dnscname":
-			if u.CName != u2.CName {
-				return false, match
-			} else {
-				match.Inquisitors[element] = u.CName
-			}
-		case "statuscode":
-			if u.StatusCode != u2.StatusCode {
-				return false, match
-			} else {
-				match.Inquisitors[element] = strconv.Itoa(u.StatusCode)
-			}
+				if !matchExists {
+					return false, match
+				}
+			case "dnscname":
+				if u.CName != u2.CName {
+					return false, match
+				} else {
+					// Record the match
+					matchedInquisitor := MatchedInquisitor{}
+					matchedInquisitor.KeyInquisitor = make(map[string]string)
+					matchedInquisitor.KeyInquisitor[element.KeyInquisitor] = u.CName
+					match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
+				}
+			case "statuscode":
+				if u.StatusCode != u2.StatusCode {
+					return false, match
+				} else {
+					// Record the match
+					matchedInquisitor := MatchedInquisitor{}
+					matchedInquisitor.KeyInquisitor = make(map[string]string)
+					matchedInquisitor.KeyInquisitor[element.KeyInquisitor] = strconv.Itoa(u.StatusCode)
+					match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
+				}
 
-		case "contentlength":
-			if u.ContentLength != u2.ContentLength {
-				return false, match
-			} else {
-				match.Inquisitors[element] = strconv.FormatInt(u.ContentLength, 10)
-			}
-		case "contenthash":
-			if u.ContentHash != u2.ContentHash {
-				return false, match
-			} else {
-				match.Inquisitors[element] = u.ContentHash
-			}
-		default:
-			fmt.Println("Unknown Inquisitor: " + element)
+			case "contentlength":
+				if u.ContentLength != u2.ContentLength {
+					return false, match
+				} else {
+					// Record the match
+					matchedInquisitor := MatchedInquisitor{}
+					matchedInquisitor.KeyInquisitor = make(map[string]string)
+					matchedInquisitor.KeyInquisitor[element.KeyInquisitor] = strconv.FormatInt(u.ContentLength, 10)
+					match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
+				}
+			case "contenthash":
+				if u.ContentHash != u2.ContentHash {
+					return false, match
+				} else {
+					// Record the match
+					matchedInquisitor := MatchedInquisitor{}
+					matchedInquisitor.KeyInquisitor = make(map[string]string)
+					matchedInquisitor.KeyInquisitor[element.KeyInquisitor] = u.ContentHash
+					match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
+				}
+			default:
+				if(len(element.KeyInquisitor) > 0){
+					fmt.Println("Unknown Inquisitor: " + element.KeyInquisitor)
+				}
 		}
-	}
+		// Check KeyValueInquisitors. This for-loop should only be 1 deep as only 1 key-value exists in KeyValueInquisitor
+		for key, value := range element.KeyValueInquisitor {
+		  switch key {
+			case "contentregex":
+			  if u.ContentRegex[value] != u2.ContentRegex[value] {
+				return false, match
+			  } else {
+					// Record the match
+					matchedInquisitor := MatchedInquisitor{}
+					matchedInquisitor.KeyValueInquisitor = make(map[string]bool)
+					matchedInquisitor.KeyValueInquisitor[key+":"+value] = u.ContentRegex[value]
+					match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
+			  }
+			default:
+			  // nothing
+		  }
+		}
+    }
 
 	// By this point, all definitions of equality have passed
 	return true, match
@@ -206,13 +267,24 @@ func existsWithin(needle *URL, haystack []*URL, rules []*Rule) bool {
 					log.Print("[+]     Duplicate of: " + url.Value)
 					log.Print("[+]     Per rule:     " + rule.Name + " (" + rule.Filepath + ")")
 					if(match.isEquivalentURL) {
-						log.Print("[+]     Strings are equivalent")
+						log.Print("[+]          Strings are equivalent")
 					}
 					for key, element := range match.Tokens {
 						log.Print("[+]          Matching " + key + ": " + element)
 					}
-					for key, element := range match.Inquisitors {
-						log.Print("[+]          Matching " + key + ": " + element)
+					for _, element := range match.Inquisitors {
+						if(len(element.KeyInquisitor) > 0){
+							// Retrieve key/value of map[string]string
+							for key, value := range element.KeyInquisitor {
+								log.Print("[+]          Matching " + key + ": " + value)
+							}
+						}
+						if(len(element.KeyValueInquisitor) > 0){
+							// Retrieve key/value of map[string]bool
+							for key, value := range element.KeyValueInquisitor {
+								log.Print("[+]          Matching " + key + " (" + strconv.FormatBool(value) + ")")
+							}
+						}
 					}
 				}
 				return true
@@ -272,7 +344,8 @@ func batchQueryIPAddress(urls []*URL, size int) {
 	}
 }
 
-func batchQueryHTTP(urls []*URL, size int) {
+// contentRegex: slice of regex strings to check.
+func batchQueryHTTP(urls []*URL, size int, contentRegex []string) {
 	maxBatchSize := size
 	skip := 0
 	numURLs := len(urls)
@@ -327,7 +400,20 @@ func batchQueryHTTP(urls []*URL, size int) {
 						currentURL.StatusCode = resp.StatusCode
 						currentURL.ContentLength = resp.ContentLength
 						responseBody := StringifyResponseBody(resp)          // get the body as a string
-						currentURL.ContentHash = CreateMD5Hash(responseBody) // lets hash this thing
+						currentURL.ContentHash = CreateMD5Hash(responseBody) // calculate hash
+						// populate regex matches, if any:
+						currentURL.ContentRegex = make(map[string]bool)
+						for _, element := range contentRegex {
+							regexMatch, err := regexp.MatchString(element,responseBody)
+							if err != nil {
+								fmt.Println("Bad regular expression: " + element)
+							}
+							if(regexMatch){
+								currentURL.ContentRegex[element] = true
+							} else {
+								currentURL.ContentRegex[element] = false
+							}
+						}
 					}
 				}
 			}(batchItems[idx])
@@ -423,7 +509,6 @@ func main() {
 	flag.IntVar(&httpTimeout, "timeout", 3, "Timeout in seconds for HTTP requests")
 	flag.BoolVar(&insecure, "insecure", false, "Disable TLS certificate verification")
 	flag.BoolVar(&verbose, "verbose", false, "Increase verbosity in stderr")
-	//cTimeout := flag.Int("timeout", 5, "Connection timeout in seconds")
 
 	// Check for stdin data:
 	stat, _ := os.Stdin.Stat()
@@ -496,34 +581,46 @@ func main() {
 		fmt.Println(err)
 	}
 
-	// Prepopulate Inquisitor-based URL attributes (fetch data only if the config rules need it)
-	// Booleans used to save whether URL struct has populated the data (to prevent multiple fetches)
-	isPopulatedDNSA := false
-	isPopulatedDNSCNAME := false
-	isPopulatedSCCL := false
-
+	// Check whether to prepopulate Inquisitor-based URL attributes (fetch data only if the config rules need it)
+	shouldPopulateDNSA := false
+	shouldPopulateDNSCNAME := false
+	shouldPopulateHTTP := false
+	shouldPopulateContentRegex := make([]string, 0)
+	
 	for _, rule := range cfg.Rules {
 		for _, element := range rule.Inquisitors {
-			switch element {
-			case "dnsa":
-				if !isPopulatedDNSA {
-					batchQueryIPAddress(urls, *numThreads)
+			// Review whether inquisitor is a Key (e.g., "dnsa")
+			switch element.KeyInquisitor {
+				case "dnsa":
+					shouldPopulateDNSA = true
+				case "dnscname":
+					shouldPopulateDNSCNAME = true
+				// If there's any of the http-get Inquisitors, populate them all from one query:
+				case "statuscode", "contentlength", "contenthash":
+					shouldPopulateHTTP = true
+			}
 
+			// Review whether inquisitor is a Key-Value (e.g., "contentregex: abcd")
+			for key, value := range element.KeyValueInquisitor {
+				switch key {
+					case "contentregex":
+						// Add regex to slice
+						shouldPopulateContentRegex = append(shouldPopulateContentRegex, value)
+						shouldPopulateHTTP = true
 				}
-				isPopulatedDNSA = true
-			case "dnscname":
-				if !isPopulatedDNSCNAME {
-					batchQueryCNAME(urls, *numThreads)
-				}
-				isPopulatedDNSCNAME = true
-			// If there's any of the http-get Inquisitors, populate them all from one query:
-			case "statuscode", "contentlength", "contenthash":
-				if !isPopulatedSCCL {
-					batchQueryHTTP(urls, *numThreads)
-				}
-				isPopulatedSCCL = true
 			}
 		}
+	}
+	
+	// Perform queries if needed:
+	if(shouldPopulateDNSA){
+		batchQueryIPAddress(urls, *numThreads)
+	}
+	if(shouldPopulateDNSCNAME){
+		batchQueryCNAME(urls, *numThreads)
+	}
+	if(shouldPopulateHTTP){
+		batchQueryHTTP(urls, *numThreads, shouldPopulateContentRegex)
 	}
 
 	// Get uniques
