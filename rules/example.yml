@@ -27,12 +27,16 @@
 #   contentlength Compares the HTTP response body content length (not the response header value, but the actual calculated length)
 #   contenthash   Compares the MD5 checksum of the response body.
 #   contentregex  Compares whether a provided regular expression is matched in the response body.
-#   headerregex   (NOT IMPLEMENTED) Compares whether a provided regular expression is matched in the response header.
+#   headerregex   Compares whether a provided regular expression is matched in the response header.*
 #   title         (NOT IMPLEMENTED) Compares the page title from the HTTP body
 #   location      (NOT IMPLEMENTED) Compares the HTTP response Location header value
 #   wordcount     (NOT IMPLEMENTED) Compares the count of words observed in the HTTP response body
 #   linecount     (NOT IMPLEMENTED) Compares the count of lines observed in the HTTP response body
 
+# *headerregex note: The net/http library canonicalizes received headers. For this reason, headers will have their first letter
+#  and any letter following a hyphen converted to upper case. For this reason, regular expressions for headers should consider using 
+#  case-insensitive flags and not traverse line breaks.
+# See for more information: https://pkg.go.dev/net/http#CanonicalHeaderKey
 
 # Available processors: these tokens alter the input string, and see if the altered string is found elsewhere in the input list.
 #   urlencode     (NOT IMPLEMENTED)

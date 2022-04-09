@@ -13,6 +13,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"regexp"
@@ -67,6 +68,7 @@ type URL struct {
 	Protocol      string // "HTTP/1.0"
 	ContentHash   string // hashed value of the content
 	ContentRegex  map[string]bool // whether a given regex is found in the content
+	HeaderRegex  map[string]bool // whether a given regex is found in the header
 
 	// Example tokens: port, path, fragment, queryparams, ...
 	Tokens map[string]string
@@ -194,6 +196,16 @@ func (u *URL) equals(u2 *URL, rule *Rule) (bool, Match) {
 					matchedInquisitor.KeyValueInquisitor[key+":"+value] = u.ContentRegex[value]
 					match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
 			  }
+			case "headerregex":
+			  if u.HeaderRegex[value] != u2.HeaderRegex[value] {
+				return false, match
+			  } else {
+					// Record the match
+					matchedInquisitor := MatchedInquisitor{}
+					matchedInquisitor.KeyValueInquisitor = make(map[string]bool)
+					matchedInquisitor.KeyValueInquisitor[key+":"+value] = u.HeaderRegex[value]
+					match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
+			  }
 			default:
 			  // nothing
 		  }
@@ -269,7 +281,7 @@ func existsWithin(needle *URL, haystack []*URL, rules []*Rule) bool {
 						if(len(element.KeyValueInquisitor) > 0){
 							// Retrieve key/value of map[string]bool
 							for key, value := range element.KeyValueInquisitor {
-								log.Print("[+]          Matching " + key + " (" + strconv.FormatBool(value) + ")")
+								log.Print("[+]          Matching " + key + " (both are " + strconv.FormatBool(value) + ")")
 							}
 						}
 					}
@@ -332,7 +344,7 @@ func batchQueryIPAddress(urls []*URL, size int) {
 }
 
 // contentRegex: slice of regex strings to check.
-func batchQueryHTTP(urls []*URL, size int, contentRegex []string) {
+func batchQueryHTTP(urls []*URL, size int, contentRegex []string, headerRegex []string) {
 	maxBatchSize := size
 	skip := 0
 	numURLs := len(urls)
@@ -387,19 +399,27 @@ func batchQueryHTTP(urls []*URL, size int, contentRegex []string) {
 						currentURL.StatusCode = resp.StatusCode
 						currentURL.ContentLength = resp.ContentLength
 						responseBody := StringifyResponseBody(resp)          // get the body as a string
+						responseHeader := StringifyResponseHeader(resp)      // get the header as a string
 						currentURL.ContentHash = CreateMD5Hash(responseBody) // calculate hash
-						// populate regex matches, if any:
+
+						// populate content regex matches, if any:
 						currentURL.ContentRegex = make(map[string]bool)
 						for _, element := range contentRegex {
 							regexMatch, err := regexp.MatchString(element,responseBody)
 							if err != nil {
 								fmt.Println("Bad regular expression: " + element)
 							}
-							if(regexMatch){
-								currentURL.ContentRegex[element] = true
-							} else {
-								currentURL.ContentRegex[element] = false
+							currentURL.ContentRegex[element] = regexMatch
+						}
+
+						// populate header regex matches, if any:
+						currentURL.HeaderRegex = make(map[string]bool)
+						for _, element := range headerRegex {
+							regexMatch, err := regexp.MatchString(element,responseHeader)
+							if err != nil {
+								fmt.Println("Bad regular expression: " + element)
 							}
+							currentURL.HeaderRegex[element] = regexMatch
 						}
 					}
 				}
@@ -408,29 +428,6 @@ func batchQueryHTTP(urls []*URL, size int, contentRegex []string) {
 		itemProcessingGroup.Wait()
 	}
 
-}
-
-func StringifyResponseBody(response *http.Response) string {
-	var responseBody string
-	bodyBytes, err := io.ReadAll(response.Body)
-	if err != nil {
-		if verbose {
-			log.Print("[+] Response Read Error: " + err.Error())
-		}
-		return ""
-	}
-	responseBody = string(bodyBytes)
-	return responseBody
-}
-
-func CreateMD5Hash(text string) string {
-	var hashed_value string
-	if len(text) > 0 {
-		hasher := md5.New()
-		hasher.Write([]byte(text))
-		hashed_value = hex.EncodeToString(hasher.Sum(nil))
-	}
-	return hashed_value
 }
 
 func batchQueryCNAME(urls []*URL, size int) {
@@ -475,6 +472,46 @@ func batchQueryCNAME(urls []*URL, size int) {
 		}
 		itemProcessingGroup.Wait()
 	}
+}
+
+func StringifyResponseBody(response *http.Response) string {
+	var responseBody string
+	bodyBytes, err := io.ReadAll(response.Body)
+	if err != nil {
+		if verbose {
+			log.Print("[+] Response Read Error: " + err.Error())
+		}
+		return ""
+	}
+	responseBody = string(bodyBytes)
+	return responseBody
+}
+
+// Unfortunately the net/http library gives us a header representation that is not original (due to parsing).
+// The order and case of header field names are lost.
+// HTTP/2 requests are dumped in HTTP/1.x form, not in their original binary representations.
+// ref: https://pkg.go.dev/net/http/httputil#DumpResponse
+func StringifyResponseHeader(response *http.Response) string {
+	var responseHeader string
+	headerBytes, err := httputil.DumpResponse(response, false)
+	if err != nil {
+		if verbose {
+			log.Print("[+] Response Read Error: " + err.Error())
+		}
+		return ""
+	}
+	responseHeader = string(headerBytes)
+	return responseHeader
+}
+
+func CreateMD5Hash(text string) string {
+	var hashed_value string
+	if len(text) > 0 {
+		hasher := md5.New()
+		hasher.Write([]byte(text))
+		hashed_value = hex.EncodeToString(hasher.Sum(nil))
+	}
+	return hashed_value
 }
 
 // Determine whether a user passed a particular command line argument
@@ -572,7 +609,8 @@ func main() {
 	shouldPopulateDNSA := false
 	shouldPopulateDNSCNAME := false
 	shouldPopulateHTTP := false
-	shouldPopulateContentRegex := make([]string, 0)
+	contentRegex := make([]string, 0)
+	headerRegex := make([]string, 0)
 	
 	for _, rule := range cfg.Rules {
 		for _, element := range rule.Inquisitors {
@@ -592,7 +630,11 @@ func main() {
 				switch key {
 					case "contentregex":
 						// Add regex to slice
-						shouldPopulateContentRegex = append(shouldPopulateContentRegex, value)
+						contentRegex = append(contentRegex, value)
+						shouldPopulateHTTP = true
+					case "headerregex":
+						// Add regex to slice
+						headerRegex = append(headerRegex, value)
 						shouldPopulateHTTP = true
 				}
 			}
@@ -607,7 +649,7 @@ func main() {
 		batchQueryCNAME(urls, *numThreads)
 	}
 	if(shouldPopulateHTTP){
-		batchQueryHTTP(urls, *numThreads, shouldPopulateContentRegex)
+		batchQueryHTTP(urls, *numThreads, contentRegex, headerRegex)
 	}
 
 	// Get uniques
