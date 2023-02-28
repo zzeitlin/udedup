@@ -2,6 +2,13 @@
 A modular URL deduplication tool.
 
 ### Installation
+
+> Using Go version 1.17 or higher:
+```
+$ go install github.com/zzeitlin/udedup@latest
+```
+
+> Using Go versions older than 1.17:
 ```
 $ go get github.com/zzeitlin/udedup
 ```
