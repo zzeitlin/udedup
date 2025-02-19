@@ -24,6 +24,7 @@ import (
 
 	"github.com/schollz/progressbar/v3"
 	"gopkg.in/yaml.v2"
+	"golang.org/x/net/html"
 )
 
 type Config struct {
@@ -67,6 +68,7 @@ type URL struct {
 	ContentLength int64
 	Protocol      string // "HTTP/1.0"
 	ContentHash   string // hashed value of the content
+	Title         string // <title> section of body
 	ContentRegex  map[string]bool // whether a given regex is found in the content
 	HeaderRegex  map[string]bool // whether a given regex is found in the header
 
@@ -176,6 +178,16 @@ func (u *URL) equals(u2 *URL, rule *Rule) (bool, Match) {
 					matchedInquisitor := MatchedInquisitor{}
 					matchedInquisitor.KeyInquisitor = make(map[string]string)
 					matchedInquisitor.KeyInquisitor[element.KeyInquisitor] = u.ContentHash
+					match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
+				}
+			case "title":
+				if u.Title != u2.Title {
+					return false, match
+				} else {
+					// Record the match
+					matchedInquisitor := MatchedInquisitor{}
+					matchedInquisitor.KeyInquisitor = make(map[string]string)
+					matchedInquisitor.KeyInquisitor[element.KeyInquisitor] = u.Title
 					match.Inquisitors = append(match.Inquisitors, matchedInquisitor)
 				}
 			default:
@@ -396,11 +408,15 @@ func batchQueryHTTP(urls []*URL, size int, contentRegex []string, headerRegex []
 						}
 					}
 					if resp != nil {
+//						respData, _ := io.ReadAll(resp.body)
+						// TODO: FIX: resp cannot be parsed more than once. It is a read-once operation. You need to read the content into a buffer, and send the buffer to each function that uses "resp".
 						currentURL.StatusCode = resp.StatusCode
 						currentURL.ContentLength = resp.ContentLength
+						currentURL.Title = GetTitleFromHTMLResponse(resp) // parse HTML body
 						responseBody := StringifyResponseBody(resp)          // get the body as a string
 						responseHeader := StringifyResponseHeader(resp)      // get the header as a string
 						currentURL.ContentHash = CreateMD5Hash(responseBody) // calculate hash
+
 
 						// populate content regex matches, if any:
 						currentURL.ContentRegex = make(map[string]bool)
@@ -514,6 +530,36 @@ func CreateMD5Hash(text string) string {
 	return hashed_value
 }
 
+func GetTitleFromHTMLResponse(response *http.Response) string {	
+	//defer response.Body.Close()
+	doc, err := html.Parse(response.Body)
+	if err != nil {
+		panic("Fail to parse html")
+	}
+
+	// Recursively find the <title> tag
+	var title string
+	var findTitle func(*html.Node)
+	findTitle = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "title" && n.FirstChild != nil {
+			title = n.FirstChild.Data
+			return
+		}
+		for c := n.FirstChild; c != nil && title == ""; c = c.NextSibling {
+			findTitle(c)
+		}
+	}
+
+	findTitle(doc)
+	if title == "" {
+		return ""
+	}
+	return title
+
+
+	//return traverseHTML(doc)
+}
+
 // Determine whether a user passed a particular command line argument
 func isFlagPassed(name string) bool {
 	found := false
@@ -621,7 +667,7 @@ func main() {
 				case "dnscname":
 					shouldPopulateDNSCNAME = true
 				// If there's any of the http-get Inquisitors, populate them all from one query:
-				case "statuscode", "contentlength", "contenthash":
+				case "statuscode", "contentlength", "contenthash", "title":
 					shouldPopulateHTTP = true
 			}
 

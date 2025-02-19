@@ -1,0 +1,6 @@
+rules:
+  - name: default
+    inquisitors:
+      - title
+      - dnsa
+
