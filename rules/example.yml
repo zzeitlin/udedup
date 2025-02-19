@@ -23,15 +23,15 @@
 # Available inquisitors
 #   dnsa          If any A record matches any A record of another input, consider them duplicates
 #   dnscname      Compares the CNAME record. Performs DNS queries using OS system libraries.
-#   statuscode    Compares the HTTP response status code
-#   contentlength Compares the HTTP response body content length (not the response header value, but the actual calculated length)
+#   statuscode    Compares the HTTP response status code.
+#   contentlength Compares the HTTP response body content length (not the response header value, but the actual calculated length).
 #   contenthash   Compares the MD5 checksum of the response body.
 #   contentregex  Compares whether a provided regular expression is matched in the response body.
 #   headerregex   Compares whether a provided regular expression is matched in the response header.*
-#   title         (NOT IMPLEMENTED) Compares the page title from the HTTP body
-#   location      (NOT IMPLEMENTED) Compares the HTTP response Location header value
-#   wordcount     (NOT IMPLEMENTED) Compares the count of words observed in the HTTP response body
-#   linecount     (NOT IMPLEMENTED) Compares the count of lines observed in the HTTP response body
+#   title         Compares the page title from the HTTP body.
+#   location      (NOT IMPLEMENTED) Compares the HTTP response Location header value.
+#   wordcount     (NOT IMPLEMENTED) Compares the count of words observed in the HTTP response body.
+#   linecount     (NOT IMPLEMENTED) Compares the count of lines observed in the HTTP response body.
 
 # *headerregex note: The net/http library canonicalizes received headers. For this reason, headers will have their first letter
 #  and any letter following a hyphen converted to upper case. For this reason, regular expressions for headers should consider using 
