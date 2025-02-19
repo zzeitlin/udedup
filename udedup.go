@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/md5"
 	"crypto/tls"
 	"encoding/hex"
@@ -13,7 +14,6 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"regexp"
@@ -405,15 +405,22 @@ func batchQueryHTTP(urls []*URL, size int, contentRegex []string, headerRegex []
 					if err != nil {
 						if verbose {
 							log.Print("[+] HTTP Error: " + err.Error())
+							return
 						}
 					}
+					defer resp.Body.Close()
+
 					if resp != nil {
-//						respData, _ := io.ReadAll(resp.body)
-						// TODO: FIX: resp cannot be parsed more than once. It is a read-once operation. You need to read the content into a buffer, and send the buffer to each function that uses "resp".
+						// Parse and store resp.Body as it can be parsed only once.
+						bodyBytes, err := io.ReadAll(resp.Body)
+						if err != nil {
+							log.Print("[+] Error reading body:", err)
+						}
+
 						currentURL.StatusCode = resp.StatusCode
 						currentURL.ContentLength = resp.ContentLength
-						currentURL.Title = GetTitleFromHTMLResponse(resp) // parse HTML body
-						responseBody := StringifyResponseBody(resp)          // get the body as a string
+						currentURL.Title = GetTitleFromHTMLResponse(bytes.NewReader(bodyBytes)) // parse HTML body
+						responseBody := StringifyResponseBody(bytes.NewReader(bodyBytes))          // get the body as a string
 						responseHeader := StringifyResponseHeader(resp)      // get the header as a string
 						currentURL.ContentHash = CreateMD5Hash(responseBody) // calculate hash
 
@@ -490,9 +497,9 @@ func batchQueryCNAME(urls []*URL, size int) {
 	}
 }
 
-func StringifyResponseBody(response *http.Response) string {
+func StringifyResponseBody(reader io.Reader) string {
 	var responseBody string
-	bodyBytes, err := io.ReadAll(response.Body)
+	bodyBytes, err := io.ReadAll(reader)
 	if err != nil {
 		if verbose {
 			log.Print("[+] Response Read Error: " + err.Error())
@@ -503,21 +510,20 @@ func StringifyResponseBody(response *http.Response) string {
 	return responseBody
 }
 
-// Unfortunately the net/http library gives us a header representation that is not original (due to parsing).
-// The order and case of header field names are lost.
-// HTTP/2 requests are dumped in HTTP/1.x form, not in their original binary representations.
-// ref: https://pkg.go.dev/net/http/httputil#DumpResponse
+// This function parses the resp.Header, resp.Proto, and resp.Status fields of the resp object.
+// It does not stream-read the resp.Body.
 func StringifyResponseHeader(response *http.Response) string {
-	var responseHeader string
-	headerBytes, err := httputil.DumpResponse(response, false)
-	if err != nil {
-		if verbose {
-			log.Print("[+] Response Read Error: " + err.Error())
+	var sb strings.Builder
+	// Hard-code the protocol and status line (the first line), as it's not included in the map of headers.
+	sb.WriteString(fmt.Sprintf("%s %s\n", response.Proto, response.Status))
+
+	// Iterate over each header:
+	for key, values := range response.Header {
+		for _, value := range values {
+			sb.WriteString(fmt.Sprintf("%s: %s\n", key, value))
 		}
-		return ""
 	}
-	responseHeader = string(headerBytes)
-	return responseHeader
+	return sb.String()
 }
 
 func CreateMD5Hash(text string) string {
@@ -530,9 +536,8 @@ func CreateMD5Hash(text string) string {
 	return hashed_value
 }
 
-func GetTitleFromHTMLResponse(response *http.Response) string {	
-	//defer response.Body.Close()
-	doc, err := html.Parse(response.Body)
+func GetTitleFromHTMLResponse(reader io.Reader) string {	
+	doc, err := html.Parse(reader)
 	if err != nil {
 		panic("Fail to parse html")
 	}
