@@ -28,7 +28,7 @@
 #   contenthash   Compares the MD5 checksum of the response body.
 #   contentregex  Compares whether a provided regular expression is matched in the response body.
 #   headerregex   Compares whether a provided regular expression is matched in the response header.*
-#   title         Compares the page title from the HTTP body.
+#   title         Compares the HTML title elements (found within the <title> tags).
 #   location      (NOT IMPLEMENTED) Compares the HTTP response Location header value.
 #   wordcount     (NOT IMPLEMENTED) Compares the count of words observed in the HTTP response body.
 #   linecount     (NOT IMPLEMENTED) Compares the count of lines observed in the HTTP response body.
