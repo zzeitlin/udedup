@@ -424,7 +424,6 @@ func batchQueryHTTP(urls []*URL, size int, contentRegex []string, headerRegex []
 						responseHeader := StringifyResponseHeader(resp)      // get the header as a string
 						currentURL.ContentHash = CreateMD5Hash(responseBody) // calculate hash
 
-
 						// populate content regex matches, if any:
 						currentURL.ContentRegex = make(map[string]bool)
 						for _, element := range contentRegex {
@@ -514,7 +513,7 @@ func StringifyResponseBody(reader io.Reader) string {
 // It does not stream-read the resp.Body.
 func StringifyResponseHeader(response *http.Response) string {
 	var sb strings.Builder
-	// Hard-code the protocol and status line (the first line), as it's not included in the map of headers.
+	// Manually retrieve the protocol and status line (the first line), as it's not included in the map of headers.
 	sb.WriteString(fmt.Sprintf("%s %s\n", response.Proto, response.Status))
 
 	// Iterate over each header:
@@ -560,9 +559,6 @@ func GetTitleFromHTMLResponse(reader io.Reader) string {
 		return ""
 	}
 	return title
-
-
-	//return traverseHTML(doc)
 }
 
 // Determine whether a user passed a particular command line argument
